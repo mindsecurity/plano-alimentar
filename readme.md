@@ -1,71 +1,60 @@
-# 📌 Google Apps Script - Plano Alimentar com IA
+# 🥗 Dieta Personalizada com IA
 
-Este repositório contém um **Google Apps Script** que automatiza a geração de planos alimentares personalizados com base em respostas de um formulário do Google Forms. O script utiliza Inteligência Artificial - **OpenAI GPT-4o** - para criar dietas específicas e envia os resultados diretamente para os usuários via e-mail.
+Este projeto utiliza o **Google Apps Script** para processar respostas de um formulário do google, calcular as necessidades nutricionais (macros, ingestão de água...) e gerar um plano alimentar totalmente personalizado baseado nos macros e objetivo. 
 
-## 🚀 Funcionalidades
-- Captura e valida os dados enviados pelo Google Forms
-- Calcula **TMB** (Taxa Metabólica Basal) e necessidades calóricas
-- Gera um plano alimentar baseado no objetivo do usuário
-- Formata e armazena os dados na planilha "Resultados Gerados"
-- Envia um e-mail ao usuário com o plano alimentar detalhado
-- Registra logs e notifica erros ao administrador
+## 🌟 Funcionalidades
 
-## 🛠️ Como funciona
-1. **Gatilho Automático**: O script é acionado sempre que um formulário for enviado.
-2. **Processamento de Dados**: Ele valida os dados e realiza os cálculos necessários.
-3. **Geração de Dieta**: O GPT-4o gera um plano alimentar com refeições detalhadas.
-4. **Armazenamento**: Os dados são salvos na planilha "Resultados Gerados".
-5. **Envio de E-mail**: O usuário recebe um e-mail com seu plano alimentar.
+- 📋 **Processamento de Respostas**: Coleta dados do Formulário.
+- 🔢 **Cálculo Nutricional**: Calcula Taxa Metabólica Basal (TMB) e necessidades calóricas diárias (macros, água).
+- 🥘 **Geração de Plano Alimentar**: Cria um plano alimentar personalizado feito por IA em formato JSON.
+- 💾 **Armazenamento de Resultados**: Salva os resultados na planilha.
+- 📧 **Envio por E-mail**: Envia o plano alimentar em formato HTML por e-mail.
 
-## 📋 Cálculos Utilizados
+## 🛠️ Estrutura do Projeto
 
-### 🎯 Taxa Metabólica Basal (TMB)
-Usa a equação de **Mifflin-St Jeor**:
-- **Homens**: `TMB = (10 × peso) + (6.25 × altura) - (5 × idade) + 5`
-- **Mulheres**: `TMB = (10 × peso) + (6.25 × altura) - (5 × idade) - 161`
+- **Código Principal**: Função `onFormSubmit(e)` que orquestra todo o fluxo.
+- **Funções Auxiliares**:
+  - `getFirstBlankRow(sheet, column)`: Encontra a primeira linha em branco em uma coluna especificada.
+  - `validateData(data)`: Valida os dados essenciais do formulário.
+  - `calculateNutritionalValues(data)`: Calcula TMB, calorias, macronutrientes e ingestão de água.
+  - `calcularTMB(peso, altura, idade, genero)`: Calcula a TMB usando a fórmula de Harris-Benedict.
+  - `calcularNecessidadeCalorica(tmb, atividade, objetivo)`: Calcula as calorias necessárias com base na TMB, atividade e objetivo.
+  - `calcularMacronutrientes(calorias, objetivo)`: Calcula a distribuição de macronutrientes.
+  - `calcularIngestaoDiariaAgua(idade, peso)`: Calcula a ingestão diária recomendada de água.
+  - `generateMealPlan(formData, nutritionalData)`: Gera o plano alimentar solicitando à API do ChatGPT-4o.
+  - `extractMealPlanDescription(mealPlan)`: Extrai a descrição do plano alimentar do JSON retornado.
+  - `sendMealPlanEmail(email, nome, nutritionalData, mealPlan)`: Envia o plano alimentar por e-mail em formato HTML.
+  - `sendErrorEmail(error)`: Envia um e-mail para o administrador em casos de erros.
 
-### 🔥 Necessidade Calórica Total
-Baseado no nível de atividade:
-- **Sedentário**: `TMB × 1.2`
-- **Leve**: `TMB × 1.375`
-- **Moderado**: `TMB × 1.55`
-- **Intenso**: `TMB × 1.725`
-- **Muito intenso**: `TMB × 1.9`
+## 📋 Pré-requisitos
 
-Dependendo do objetivo:
-- **Ganhar Massa Muscular**: +500 kcal
-- **Perder Gordura**: -500 kcal
+- **Planilha do Google**: Deve conter as abas "Respostas do Formulário" e "Resultados Gerados".
+- **Formulário do Google**: Configurado para salvar respostas na aba "Respostas do Formulário".
+- **API Key do OpenAI**: Necessária para a função `generateMealPlan` que utiliza a API do ChatGPT.
 
-### 🍽️ Macronutrientes
-- **Proteínas**: `30% das calorias ÷ 4`
-- **Carboidratos**: `50% das calorias ÷ 4`
-- **Gorduras**: `20% das calorias ÷ 9`
+## ⚙️ Configuração
 
-### 💧 Recomendação de Água
-`Peso (kg) × 35 ml`
+1. **Planilha**: Crie uma planilha com as abas mencionadas acima.
+2. **Formulário**: Configure um formulário para coletar os dados necessários e salvar as respostas na planilha.
+3. **Google Apps Script**: No editor de script da planilha, adicione o código fornecido.
+4. **Propriedades do Script**: Adicione a chave da API do OpenAI nas propriedades do script com o nome 'OPENAI_API_KEY'.
+5. **Triggers**: Configure um trigger para a função `onFormSubmit` ser executada ao enviar o formulário.
 
-## 🏗️ Configuração
-1. Acesse o **Google Apps Script** no Google Sheets associado ao formulário.
-2. Cole o código do repositório no editor de scripts.
-3. Configure um **gatilho** para acionar `onFormSubmit` na submissão do formulário.
-4. Adicione sua **OpenAI API Key** em **Propriedades do Script** (`OPENAI_API_KEY`).
-5. Salve e execute para testar.
+## 🚀 Uso
 
-## 📩 Envio de E-mail
-O usuário recebe um e-mail formatado com:
-- Dados personalizados
-- Informações calóricas e de macronutrientes
-- Plano alimentar detalhado
+Após a configuração, sempre que uma nova resposta for submetida através do formulário:
 
-## 🛠️ Personalizações
-- Alterar o modelo do OpenAI para um diferente (ex: `gpt-4` em vez de `gpt-4o`)
-- Modificar a lógica de cálculos conforme necessidade
-- Customizar o e-mail enviado para melhor apresentação
+1. A função `onFormSubmit` é acionada.
+2. Os dados são processados e validados.
+3. As necessidades nutricionais são calculadas.
+4. Um plano alimentar personalizado é gerado utilizando a API do ChatGPT.
+5. Os resultados são armazenados na aba "Resultados Gerados" da planilha.
+6. O plano alimentar é enviado por e-mail ao usuário.
 
-## ⚠️ Logs e Erros
-- Todas as falhas são registradas no **Logger do Apps Script**.
-- Em caso de erro crítico, um e-mail é enviado para o administrador.
+## 📞 Contato
 
----
+Para dúvidas ou sugestões, sinta-se à vontade para entrar em contato:
 
-📌 **Criado por**: [Marcos Tolosa] | 📧 Contato: [marcos.tolosa@mindsecurity.org]
+- **Email**: [marcos.tolosa@owasp.org](mailto:marcos.tolosa@owasp.org)
+- **LinkedIn**: [https://www.linkedin.com/in/marcos-tolosa](https://www.linkedin.com/in/marcos-tolosa)
+- **GitHub**: [https://github.com/marcostolosa](https://github.com/marcostolosa)
