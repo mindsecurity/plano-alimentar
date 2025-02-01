@@ -1,217 +1,362 @@
 /**
- * Processa submissões de formulário, calcula métricas nutricionais e coordena o fluxo principal
- * @param {Object} e - Objeto de evento do Google Forms contendo dados da submissão
+ * Função principal que orquestra todo o fluxo:
+ * - Obtém os dados da última linha preenchida na aba "Respostas do Formulário"
+ * - Calcula os valores nutricionais
+ * - Gera o plano alimentar no formato JSON padronizado (com marcadores)
+ * - Atualiza a aba "Resultados Gerados" na primeira linha em branco:
+ *     - Colunas A a J com os dados principais
+ *     - Coluna K com a descrição das refeições (de Café da Manhã a Ceia)
+ *     - Adiciona o plano completo como comentário na mesma célula
+ * - Envia o e-mail com o plano alimentar em HTML
  */
 function onFormSubmit(e) {
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(5000)) return; // Previne execuções paralelas
-  
   try {
-    let data, row;
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Respostas do Formulário");
-    const resultSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Resultados Gerados");
-
-    // Modo manual (execução sem trigger)
-    if (!e || !e.range) {
-      // Encontra a última linha com email válido
-      const emailColumn = sheet.getRange("B:B").getValues().flat();
-      let lastValidRow = emailColumn.lastIndexOf(emailColumn.filter(x => x.toString().includes("@")).pop()) + 1;
-      
-      if(lastValidRow < 2) throw "Nenhum formulário válido encontrado";
-      
-      data = sheet.getRange(lastValidRow, 1, 1, sheet.getLastColumn()).getValues()[0];
-      row = lastValidRow;
-    } 
-    // Modo trigger (execução normal)
-    else {
+    if (!lock.tryLock(5000)) return;
+    
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const formSheet = ss.getSheetByName("Respostas do Formulário");
+    const resultSheet = ss.getSheetByName("Resultados Gerados");
+    let data;
+    
+    // Se acionado por trigger, usa os dados do evento; caso contrário, pega a última linha preenchida
+    if (e && e.range) {
       data = e.values;
-      row = e.range.getRow();
+      Logger.log("Dados recebidos via trigger: " + JSON.stringify(data));
+    } else {
+      const lastRow = formSheet.getLastRow();
+      data = formSheet.getRange(lastRow, 1, 1, formSheet.getLastColumn()).getValues()[0];
+      Logger.log("Dados obtidos da última linha: " + JSON.stringify(data));
     }
     
-    var timestamp = data[0];
-    var email = data[1].trim();
-    var nome = data[2].trim();
-    var objetivo = data[3].trim();
-    var genero = data[5].trim();
-    var atividade = data[8].trim();
-    var restricao = data[9].trim();
-    var whatsapp = (data[10]?.toString() || "").replace(/\D/g, "").slice(0, 11);
-    var culinaria = data[11].trim();
-    var idade = parseInt((data[4]?.toString() || "0").replace(/\D/g, "")) || 0;
-    var altura = parseInt((data[6]?.toString() || "0").replace(/\D/g, "")) || 0;
-    var peso = parseFloat((data[7]?.toString() || "0").replace(/[^0-9.]/g, "")) || 0;
-
-    Logger.log("Conteúdo obtido das colunas:");
-    Logger.log("email: " + email);
-    Logger.log("nome: " + nome);
-    Logger.log("objetivo: " + objetivo);
-    Logger.log("idade: " + idade);
-    Logger.log("genero: " + genero);
-    Logger.log("altura: " + altura);
-    Logger.log("peso: " + peso);
-    Logger.log("atividade: " + atividade);
-    Logger.log("restricao: " + restricao);
-    Logger.log("whatsapp: " + whatsapp);
-    Logger.log("culinaria: " + culinaria);
-
-    // Após obter todas as variáveis (antes do cálculo do TMB)
-    if (!email.includes("@")) throw "E-mail inválido";
-    if (peso < 30 || peso > 300) throw "Peso inválido (30-300kg)";
-    if (altura < 100 || altura > 250) throw "Altura inválida (100-250cm)";
-    if (isNaN(idade) || idade < 1) throw "Idade inválida";
+    // Extração dos dados (ajuste os índices conforme seu formulário)
+    const formData = {
+      email: data[1].trim(),
+      nome: data[2].trim(),
+      objetivo: data[3].trim(),
+      idade: parseInt((data[4] || "").toString().replace(/\D/g, "")) || 0,
+      genero: data[5].trim(),
+      altura: parseInt((data[6] || "").toString().replace(/\D/g, "")) || 0,
+      peso: parseFloat((data[7] || "").toString().replace(/[^0-9.]/g, "")) || 0,
+      atividade: data[8].trim(),
+      restricao: data[9].trim(),
+      whatsapp: (data[10] ? data[10].toString().replace(/\D/g, "").slice(0, 11) : ""),
+      culinaria: data[11].trim()
+    };
+    Logger.log("Form Data: " + JSON.stringify(formData));
     
-    var tmb = calcularTMB(peso, altura, idade, genero);
-    var calorias = calcularNecessidadeCalorica(tmb, atividade, objetivo);
-    var macros = calcularMacronutrientes(calorias, objetivo);
-    var agua = calcularAguaDiaria(peso);
-
-    Logger.log("TMB: " + tmb);
-    Logger.log("Calorias: " + calorias);
-    Logger.log("Proteínas: " + macros.proteinas + ", Carboidratos: " + macros.carboidratos + ", Gorduras: " + macros.gorduras);
-    Logger.log("Água: " + agua);
-
-    const targetRow = row; // Usa a mesma linha do formulário
-    resultSheet.getRange(targetRow, 1, 1, 10).setValues([
-      [nome, email, calorias, macros.proteinas, macros.carboidratos, macros.gorduras, restricao, culinaria, whatsapp, agua]
-    ]);
+    // Validação dos dados essenciais
+    validateData(formData);
     
-    var planoAlimentar = gerarPlanoAlimentarGPT(nome, idade, peso, altura, objetivo, calorias, macros, restricao, culinaria);
-
-    console.log("Tipo do plano:", typeof planoAlimentar);
-    console.log("Conteúdo:", planoAlimentar.slice(0, 500) + "...");
-    console.log("Última linha:", row);
-
-    // Escreve na coluna K (11) antes de enviar o e-mail
-    resultSheet.getRange(row, 11).setValue(planoAlimentar);
-    resultSheet.getRange(row, 11).setWrap(true);
-
-    // Envia o e-mail apenas se o plano for gerado
-    if (planoAlimentar) {
-      enviarEmailUsuario(email, nome, calorias, macros, agua, planoAlimentar);
+    // Cálculos nutricionais
+    const nutritionalData = calculateNutritionalValues(formData);
+    Logger.log("Nutritional Data: " + JSON.stringify(nutritionalData));
+    
+    // Determina a primeira linha em branco na aba "Resultados Gerados"
+    const targetRow = getFirstBlankRow(resultSheet, 1);
+    Logger.log("Linha alvo para salvar resultados: " + targetRow);
+    
+    // Atualiza as colunas A a J com os dados calculados
+    resultSheet.getRange(targetRow, 1, 1, 10).setValues([[
+      formData.nome,
+      formData.email,
+      nutritionalData.calorias,
+      nutritionalData.macros.proteinas,
+      nutritionalData.macros.carboidratos,
+      nutritionalData.macros.gorduras,
+      formData.restricao,
+      formData.culinaria,
+      formData.whatsapp,
+      nutritionalData.agua
+    ]]);
+    
+    // Gera o plano alimentar (em formato JSON padronizado)
+    let mealPlan = generateMealPlan(formData, nutritionalData);
+    if (typeof mealPlan !== 'string') {
+      mealPlan = JSON.stringify(mealPlan);
     }
-
-    lock.releaseLock();
+    Logger.log("Plano Alimentar Completo (primeiros 500 caracteres): " + mealPlan.slice(0, 500));
+    
+    // Extrai a descrição das refeições (apenas o conteúdo das 6 refeições)
+    const mealPlanDescription = extractMealPlanDescription(mealPlan);
+    Logger.log("Descrição extraída das refeições: " + mealPlanDescription);
+    
+    // Atualiza a coluna K com a descrição e adiciona o plano completo como comentário
+    resultSheet.getRange(targetRow, 11).setValue(mealPlanDescription);
+    resultSheet.getRange(targetRow, 11).setWrap(true);
+    resultSheet.getRange(targetRow, 11).setComment(mealPlan);
+    
+    // Envia o e-mail com o plano alimentar em HTML
+    sendMealPlanEmail(formData.email, formData.nome, nutritionalData, mealPlan);
+    
   } catch (error) {
-    lock.releaseLock();
-    const errorMsg = `Erro: ${error.stack || error}`; 
+    const errorMsg = `Erro: ${error.stack || error}`;
     Logger.log(errorMsg);
-    enviarErroAdmin(errorMsg);
+    sendErrorEmail(errorMsg);
+  } finally {
+    lock.releaseLock();
   }
 }
 
 /**
- * Calcula a Taxa Metabólica Basal (TMB) usando a equação de Harris-Benedict revisada
- * @param {number} peso - Peso em quilogramas
- * @param {number} altura - Altura em centímetros
- * @param {number} idade - Idade em anos completos
- * @param {string} genero - Gênero biológico ('masculino' ou 'feminino')
- * @returns {number} Valor da TMB em kcal/dia
+ * Função auxiliar para encontrar a primeira linha em branco na coluna especificada.
+ */
+function getFirstBlankRow(sheet, column) {
+  const data = sheet.getRange(1, column, sheet.getLastRow(), 1).getValues();
+  for (let i = 0; i < data.length; i++) {
+    if (data[i][0] === "") {
+      return i + 1;
+    }
+  }
+  return sheet.getLastRow() + 1;
+}
+
+/**
+ * Valida os dados essenciais do formulário.
+ */
+function validateData(data) {
+  if (!data.email.includes("@")) throw "E-mail inválido";
+  if (data.peso < 30 || data.peso > 300) throw "Peso inválido (30-300kg)";
+  if (data.altura < 100 || data.altura > 250) throw "Altura inválida (100-250cm)";
+  if (isNaN(data.idade) || data.idade < 1) throw "Idade inválida";
+}
+
+/**
+ * Calcula os valores nutricionais: TMB, calorias, macronutrientes e ingestão de água.
+ */
+function calculateNutritionalValues(data) {
+  const tmb = calcularTMB(data.peso, data.altura, data.idade, data.genero);
+  const calorias = calcularNecessidadeCalorica(tmb, data.atividade, data.objetivo);
+  const macros = calcularMacronutrientes(calorias, data.objetivo);
+  const agua = calcularAguaDiaria(data.peso);
+  return { tmb, calorias, macros, agua };
+}
+
+/**
+ * Calcula a TMB usando a fórmula de Harris-Benedict.
  */
 function calcularTMB(peso, altura, idade, genero) {
-  if (isNaN(peso) || isNaN(altura) || isNaN(idade)) {
-    throw "Valores numéricos inválidos para peso, altura ou idade";
-  }
-  
   genero = genero.toLowerCase().trim();
-  return (genero === "masculino") 
+  return (genero === "masculino")
     ? (10 * peso) + (6.25 * altura) - (5 * idade) + 5
     : (10 * peso) + (6.25 * altura) - (5 * idade) - 161;
 }
 
 /**
- * Calcula a necessidade calórica diária com base no nível de atividade física e objetivo
- * @param {number} tmb - Taxa Metabólica Basal calculada
- * @param {string} atividade - Nível de atividade física (Sedentário a Atleta)
- * @param {string} objetivo - Objetivo do usuário (Manter, Ganhar ou Perder peso)
- * @returns {number} Calorias diárias ajustadas
+ * Calcula as calorias necessárias com base na TMB, atividade e objetivo.
  */
 function calcularNecessidadeCalorica(tmb, atividade, objetivo) {
-  var fatores = { "Sedentário": 1.2, "Leve": 1.375, "Moderado": 1.55, "Intenso": 1.725, "Atleta": 1.9 };
-  var fatorAtividade = fatores[atividade.toLowerCase()] || 1.2;
-  var calorias = tmb * fatorAtividade;
-  if (objetivo.toLowerCase() === "Ganhar massa muscular") calorias += 500;
-  if (objetivo.toLowerCase() === "Perder gordura") calorias -= 500;
+  const fatores = { "sedentário": 1.2, "leve": 1.375, "moderado": 1.55, "intenso": 1.725, "atleta": 1.9 };
+  const fatorAtividade = fatores[atividade.toLowerCase()] || 1.2;
+  let calorias = tmb * fatorAtividade;
+  if (objetivo.toLowerCase() === "ganhar massa muscular") calorias += 500;
+  if (objetivo.toLowerCase() === "perder gordura") calorias -= 500;
   return Math.round(calorias);
 }
 
 /**
- * Distribui as calorias totais em macronutrientes seguindo proporções específicas
- * @param {number} calorias - Total de calorias diárias
- * @param {string} objetivo - Usado para ajustes futuros na distribuição
- * @returns {Object} Objeto com quantidades em gramas de proteínas, carboidratos e gorduras
+ * Calcula os macronutrientes com a divisão: 30% proteínas, 50% carboidratos, 20% gorduras.
  */
 function calcularMacronutrientes(calorias, objetivo) {
-  var proteinas = Math.round((calorias * 0.3) / 4);
-  var carboidratos = Math.round((calorias * 0.5) / 4);
-  var gorduras = Math.round((calorias * 0.2) / 9);
+  const proteinas = Math.round((calorias * 0.3) / 4);
+  const carboidratos = Math.round((calorias * 0.5) / 4);
+  const gorduras = Math.round((calorias * 0.2) / 9);
   return { proteinas, carboidratos, gorduras };
 }
 
 /**
- * Calcula a recomendação de ingestão diária de água baseada no peso
- * @param {number} peso - Peso em quilogramas
- * @returns {string} Quantidade de água em ml com sufixo unitário
+ * Calcula a ingestão diária de água com base na idade e no peso.
+ *
+ * @param {number} idade - Idade da pessoa em anos.
+ * @param {number} peso - Peso da pessoa em quilogramas.
+ * @return {number} - Ingestão diária recomendada de água em mililitros.
  */
-function calcularAguaDiaria(peso) {
-  return (peso * 35) + " ml";
+function calcularIngestaoDiariaAgua(idade, peso) {
+  if (idade <= 0 || peso <= 0) {
+    throw new Error('Idade e peso devem ser maiores que zero.');
+  }
+
+  let mlPorKg;
+
+  if (idade <= 17) {
+    mlPorKg = 40;
+  } else if (idade <= 55) {
+    mlPorKg = 35;
+  } else if (idade <= 65) {
+    mlPorKg = 30;
+  } else {
+    mlPorKg = 25;
+  }
+
+  return mlPorKg * peso;
 }
 
 /**
- * Gera plano alimentar personalizado usando API da OpenAI (GPT-4o)
- * @param {string} nome - Nome do usuário para personalização
- * @param {number} idade - Idade para ajustes nutricionais
- * @param {number} peso - Peso atual em kg
- * @param {number} altura - Altura em cm
- * @param {string} objetivo - Meta específica do usuário
- * @param {number} calorias - Meta calórica diária
- * @param {Object} macros - Distribuição de macronutrientes
- * @param {string} restricao - Restrições alimentares ou alergias
- * @param {string} culinaria - Preferências culinárias
- * @returns {string} Plano alimentar formatado com refeições e quantidades
+ * Solicita à API do ChatGPT a geração do plano alimentar, retornando uma resposta
+ * no formato JSON padronizado com os marcadores:
+ *   ##CAFE##, ##LANCHE_MANHA##, ##ALMOCO##, ##LANCHE_TARDE##, ##JANTAR##, ##CEIA##, ##DESCRICAO##
  */
-function gerarPlanoAlimentarGPT(nome, idade, peso, altura, objetivo, calorias, macros, restricao, culinaria) {
+function generateMealPlan(formData, nutritionalData) {
   const apiKey = PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');
-  var url = "https://api.openai.com/v1/chat/completions";
-  var prompt = `Crie um plano alimentar para ${nome}, ${idade} anos, ${peso}kg, ${altura}cm. Objetivo: ${objetivo}. Calorias: ${calorias}. Proteínas: ${macros.proteinas}g, Carboidratos: ${macros.carboidratos}g, Gorduras: ${macros.gorduras}g. Restrições: ${restricao}. Culinária preferida: ${culinaria}. Inclua café da manhã, lanche da manhã, almoço, lanche da tarde, jantar e ceia.`;
   
-  var options = {
+  const url = "https://api.openai.com/v1/chat/completions";
+  const prompt = `Crie um plano alimentar para ${formData.nome}, ${formData.idade} anos, ${formData.peso}kg, ${formData.altura}cm.
+Objetivo: ${formData.objetivo}.
+Calorias: ${nutritionalData.calorias}.
+Proteínas: ${nutritionalData.macros.proteinas}g, Carboidratos: ${nutritionalData.macros.carboidratos}g, Gorduras: ${nutritionalData.macros.gorduras}g.
+Restrições: ${formData.restricao}.
+Culinária preferida: ${formData.culinaria}.
+Por favor, retorne a resposta estritamente no seguinte formato JSON (sem textos adicionais):
+{
+  "description": "Breve descrição de como seguir a dieta.",
+  "meals": {
+    "cafe_da_manha": "Detalhes do café da manhã",
+    "lanche_da_manha": "Detalhes do lanche da manhã",
+    "almoco": "Detalhes do almoço",
+    "lanche_da_tarde": "Detalhes do lanche da tarde",
+    "jantar": "Detalhes do jantar",
+    "ceia": "Detalhes da ceia"
+  }
+}`;
+  
+  const options = {
     method: "post",
-    headers: { "Authorization": "Bearer " + apiKey, "Content-Type": "application/json" },
-    payload: JSON.stringify({ model: "gpt-4o", messages: [{ role: "system", content: "Você é um nutricionista especializado em planos alimentares. Sempre inclua quantidades precisas em gramas e medidas caseiras. Exemplo: '100g (1 xícara)'" }, { role: "user", content: prompt }, temperature: 0.5,] })
+    headers: { 
+      "Authorization": "Bearer " + apiKey,
+      "Content-Type": "application/json"
+    },
+    payload: JSON.stringify({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: "Você é um nutricionista especializado em planos alimentares." },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.5
+    })
   };
   
-  var response = UrlFetchApp.fetch(url, options);
-  var json = JSON.parse(response.getContentText());
-  return json.choices[0].message.content;
-}
-
-/**
- * Envia e-mail ao usuário com os resultados do plano alimentar
- * @param {string} email - Endereço de e-mail do destinatário
- * @param {string} nome - Nome do usuário para personalização
- * @param {number} calorias - Meta calórica diária
- * @param {Object} macros - Distribuição de macronutrientes
- * @param {string} agua - Recomendação de ingestão hídrica
- * @param {string} plano - Plano alimentar completo formatado em HTML
- */
-function enviarEmailUsuario(email, nome, calorias, macros, agua, plano) {
-  var assunto = "🥗 Seu Plano Alimentar Personalizado";
-  var corpo = `<h2>Olá ${nome}, aqui está seu plano alimentar!</h2>
-  <p><b>Calorias:</b> ${calorias} kcal</p>
-  <p><b>Proteínas:</b> ${macros.proteinas}gr</p>
-  <p><b>Carboidratos:</b> ${macros.carboidratos}gr</p>
-  <p><b>Gorduras:</b> ${macros.gorduras}gr</p>
-  <p><b>Água diária:</b> ${agua}ml</p>
-  <h3>Plano Alimentar:</h3>
-  <p>${plano.replace(/\n/g, "<br>")}</p>`;
+  const response = UrlFetchApp.fetch(url, options);
+  const json = JSON.parse(response.getContentText());
+  let planText = json.choices[0].message.content;
   
-  MailApp.sendEmail({ to: email, subject: assunto, htmlBody: corpo });
+  // Remove code fences se existirem
+  if (planText.startsWith("```json")) {
+    planText = planText.replace(/^```json\s*/, "").replace(/```$/, "").trim();
+  } else if (planText.startsWith("```")) {
+    planText = planText.replace(/^```\s*/, "").replace(/```$/, "").trim();
+  }
+  Logger.log("Resposta da API limpa: " + planText);
+  return planText;
 }
 
 /**
- * Notifica administradores sobre erros ocorridos no sistema
- * @param {string} erro - Mensagem de erro detalhada
+ * Extrai a descrição do plano alimentar (a partir do marcador ##DESCRICAO##) do JSON retornado.
  */
-function enviarErroAdmin(erro) {
-  MailApp.sendEmail("marcos.tolosa@owasp.org", "Erro no Script", "Erro ocorrido: " + erro);
+function extractMealPlanDescription(mealPlan) {
+  let data;
+  try {
+    data = JSON.parse(mealPlan);
+  } catch (e) {
+    Logger.log("Erro ao parsear JSON em extractMealPlanDescription: " + e);
+    return "";
+  }
+  return data.description || "";
+}
+
+/**
+ * Envia o e-mail com o plano alimentar em HTML.
+ * O plain text é definido como string vazia para forçar a exibição do HTML.
+ */
+function sendMealPlanEmail(email, nome, nutritionalData, mealPlan) {
+  // Extrai a descrição e os dados do plano alimentar do JSON
+  const planData = JSON.parse(mealPlan);
+  Logger.log("Plan Data extraída: " + JSON.stringify(planData));
+  
+  // Gera a tabela HTML para as refeições
+  let mealsHtml = "";
+  const mealOrder = ["cafe_da_manha", "lanche_da_manha", "almoco", "lanche_da_tarde", "jantar", "ceia"];
+  mealOrder.forEach(key => {
+    if (planData.meals && planData.meals[key]) {
+      const title = key.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+      mealsHtml += `<tr><td>${title}</td><td>${planData.meals[key]}</td></tr>`;
+    }
+  });
+  if (mealsHtml !== "") {
+    mealsHtml = `<table>${mealsHtml}</table>`;
+  }
+  Logger.log("Tabela HTML gerada: " + mealsHtml);
+  
+  const assunto = `Plano Alimentar Personalizado para ${nome} | IA Secrets`;
+  const corpo = `
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <style>
+      body { font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px; }
+      .container { max-width: 600px; margin: 0 auto; background: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+      h1 { color: #27ae60; text-align: center; }
+      .section { margin-bottom: 20px; padding: 15px; border-radius: 8px; background: #f9f9f9; }
+      .title { font-size: 18px; font-weight: bold; color: #333; margin-bottom: 8px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+      th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+      th { background-color: #27ae60; color: white; }
+      .footer { text-align: center; font-size: 14px; color: #555; margin-top: 20px; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Seu Plano Alimentar Personalizado</h1>
+      <p>Olá, <strong>${nome}</strong>! Aqui está o seu plano alimentar criado especialmente para você.</p>
+      
+      <div class="section">
+        <div class="title">Como seguir este plano?</div>
+        <p>${planData.description}</p>
+      </div>
+  
+      <div class="section">
+        <div class="title">Informações Nutricionais:</div>
+        <table>
+          <tr>
+            <th>Calorias</th>
+            <th>Proteínas</th>
+            <th>Carboidratos</th>
+            <th>Gorduras</th>
+          </tr>
+          <tr>
+            <td>${nutritionalData.calorias} kcal</td>
+            <td>${nutritionalData.macros.proteinas} g</td>
+            <td>${nutritionalData.macros.carboidratos} g</td>
+            <td>${nutritionalData.macros.gorduras} g</td>
+          </tr>
+        </table>
+      </div>
+  
+      <div class="section">
+        <div class="title">Plano Alimentar:</div>
+        ${mealsHtml}
+      </div>
+  
+      <div class="section">
+        <div class="title">Ingestão de Água Recomendada:</div>
+        <p>${nutritionalData.agua} por dia</p>
+      </div>
+  
+      <p>Continue firme no seu objetivo! Se precisar de ajustes, estamos à disposição.</p>
+      
+      <div class="footer">
+        <p><strong>Equipe MindSecurity AI</strong></p>
+      </div>
+    </div>
+  </body>
+</html>
+  `;
+  Logger.log("Corpo do e-mail HTML (primeiros 500 caracteres): " + corpo.slice(0, 500));
+  GmailApp.sendEmail(email, assunto, "", { htmlBody: corpo });
+}
+
+/**
+ * Envia um e-mail de erro para o administrador.
+ */
+function sendErrorEmail(error) {
+  GmailApp.sendEmail("marcos.tolosa@owasp.org", "Erro no Script de Nutrição", "Erro ocorrido: " + error);
 }
