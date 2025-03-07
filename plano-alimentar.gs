@@ -338,13 +338,13 @@ function sendMealPlanEmail(email, nome, nutritionalData, mealPlan) {
   
       <div class="section">
         <div class="title">Ingestão de Água Recomendada:</div>
-        <p>${nutritionalData.agua} por dia</p>
+        <p>${nutritionalData.agua} ml por dia</p>
       </div>
   
       <p>Continue firme no seu objetivo! Se precisar de ajustes, estamos à disposição.</p>
       
       <div class="footer">
-        <p><strong>Equipe MindSecurity AI</strong></p>
+        <p><strong>Equipe MindSecurity AI @ 2025</strong></p>
       </div>
     </div>
   </body>
