@@ -137,7 +137,7 @@ function calculateNutritionalValues(data) {
  */
 function calcularTMB(peso, altura, idade, genero) {
   genero = genero.toLowerCase().trim();
-  return (genero === "masculino")
+  return (genero === "Masculino")
     ? (10 * peso) + (6.25 * altura) - (5 * idade) + 5
     : (10 * peso) + (6.25 * altura) - (5 * idade) - 161;
 }
@@ -146,11 +146,11 @@ function calcularTMB(peso, altura, idade, genero) {
  * Calcula as calorias necessárias com base na TMB, atividade e objetivo.
  */
 function calcularNecessidadeCalorica(tmb, atividade, objetivo) {
-  const fatores = { "sedentário": 1.2, "leve": 1.375, "moderado": 1.55, "intenso": 1.725, "atleta": 1.9 };
+  const fatores = { "Sedentário": 1.2, "Leve": 1.375, "Moderado": 1.55, "Intenso": 1.725, "Atleta": 1.9 };
   const fatorAtividade = fatores[atividade.toLowerCase()] || 1.2;
   let calorias = tmb * fatorAtividade;
-  if (objetivo.toLowerCase() === "ganhar massa muscular") calorias += 500;
-  if (objetivo.toLowerCase() === "perder gordura") calorias -= 500;
+  if (objetivo.toLowerCase() === "Ganhar massa muscular") calorias += 500;
+  if (objetivo.toLowerCase() === "Perder gordura") calorias -= 500;
   return Math.round(calorias);
 }
 
@@ -338,13 +338,13 @@ function sendMealPlanEmail(email, nome, nutritionalData, mealPlan) {
   
       <div class="section">
         <div class="title">Ingestão de Água Recomendada:</div>
-        <p>${nutritionalData.agua} ml por dia</p>
+        <p>${nutritionalData.agua} por dia</p>
       </div>
   
       <p>Continue firme no seu objetivo! Se precisar de ajustes, estamos à disposição.</p>
       
       <div class="footer">
-        <p><strong>Equipe MindSecurity AI @ 2025</strong></p>
+        <p><strong>Equipe MindSecurity AI</strong></p>
       </div>
     </div>
   </body>
