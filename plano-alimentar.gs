@@ -228,7 +228,7 @@ Por favor, retorne a resposta estritamente no seguinte formato JSON (sem textos 
     payload: JSON.stringify({
       model: "gpt-4o",
       messages: [
-        { role: "system", content: "Você é um nutricionista especializado em planos alimentares." },
+        { role: "system", content: "Você vai atuar como um nutricionista formado, que também é um nutrólogo formado. Especialista em planos alimentares personalizados e criação de dietas específicas, como hipertrofia e emagrecimento. Você tem mais de 30 anos de experiência prática e só utiliza processos comprovados pela ciência e validados com artigos científicos." },
         { role: "user", content: prompt }
       ],
       temperature: 0.5
